@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import "./App.css";
 import { auth } from "./firebase-config";
 import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import TextEditor from "./components/Text-Editor";
 
 function App() {
   useEffect(() => {
@@ -19,6 +20,7 @@ function App() {
         <header>
           <h1>Google Docs Clone</h1>
         </header>
+        <TextEditor />
       </div>
     </>
   );
