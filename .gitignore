@@ -24,3 +24,4 @@ src/firebase-config.ts
 *.njsproj
 *.sln
 *.sw?
+src/firebase-config.ts
