@@ -1,67 +1,90 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactQuill from "react-quill";
-import { setDoc, doc, getDoc } from "firebase/firestore";
 import { db } from "../firebase-config";
+import { doc, getDoc, setDoc, onSnapshot } from "firebase/firestore";
 import "react-quill/dist/quill.snow.css";
+import { throttle } from "lodash";
 import "../App.css";
 
-export default function TextEditor() {
-  const [IsEditing, SetIsEditing] = useState(false);
+function Editor() {
+  const [isEditing, setIsEditing] = useState<boolean>(false);
+  const quillRef = useRef<any>(null);
+  const documentRef = doc(db, "documents", "example-doc");
 
+  // Track if a change was made by the local user
   const isLocalChange = useRef(false);
 
-  const quillRef = useRef<any>(null);
-
-  const documentRef = doc(db, "documents", "sample-doc");
-
-  const saveContent = () => {
+  // Save content to Firestore with throttle
+  const saveContent = throttle(() => {
     if (quillRef.current && isLocalChange.current) {
-      const editor = quillRef.current.getEditor();
-      const content = editor.getContents();
-      console.log("Saving content to db: ", content);
-
+      const content = quillRef.current.getEditor().getContents();
+      console.log("Saving content to Firestore:", content);
       setDoc(documentRef, { content: content.ops }, { merge: true })
-        .then(() => console.log("Content saved"))
-        .catch((error) => console.error("Error saving content: ", error));
-
-      isLocalChange.current = false;
+        .then(() => console.log("Content saved successfully"))
+        .catch(console.error);
+      isLocalChange.current = false; // Reset local change flag after saving
     }
-  };
+  }, 1000);
 
   useEffect(() => {
     if (quillRef.current) {
-      // load initial content from firestore db
+      // Load initial content from Firestore
       getDoc(documentRef)
-        .then((doc) => {
-          if (doc.exists()) {
-            const data = doc.data();
-            if (data) {
-              const editor = quillRef.current.getEditor();
-              editor.setContents(data.content);
+        .then((docSnap) => {
+          if (docSnap.exists()) {
+            const savedContent = docSnap.data().content;
+            if (savedContent) {
+              quillRef.current.getEditor().setContents(savedContent);
             }
           } else {
-            console.log("No doc found, starting with any empty editor");
+            console.log("No document found, starting with empty editor.");
           }
         })
-        .catch((error) => console.error("Error getting document:", error));
-      // listen to firestore for any updates and update locally in real-time
-      // listen for local text changes and save it to firestore
+        .catch(console.error);
 
-      const editor = quillRef.current.getEditor();
-      editor.on("text-change", (delta: any, oldDelta: any, source: any) => {
-        if (source === "user") {
-          isLocalChange.current = true;
-          SetIsEditing(true);
-          saveContent();
+      // Listen for Firestore document updates in real-time
+      const unsubscribe = onSnapshot(documentRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const newContent = snapshot.data().content;
 
-          setTimeout(() => SetIsEditing(false), 5000);
+          if (!isEditing) {
+            const editor = quillRef.current.getEditor();
+            const currentCursorPosition = editor.getSelection()?.index || 0; // Get the current cursor position
+
+            // Apply content update silently to avoid triggering `text-change`
+            editor.setContents(newContent, "silent");
+
+            // Restore cursor position after content update
+            editor.setSelection(currentCursorPosition);
+          }
         }
       });
+
+      // Listen for local text changes and save to Firestore
+      const editor = quillRef.current.getEditor();
+      editor.on("text-change", (delta, oldDelta, source) => {
+        if (source === "user") {
+          isLocalChange.current = true; // Mark change as local
+          setIsEditing(true);
+          saveContent();
+
+          // Reset editing state after 5 seconds of inactivity
+          setTimeout(() => setIsEditing(false), 5000);
+        }
+      });
+
+      return () => {
+        unsubscribe();
+        editor.off("text-change");
+      };
     }
   }, []);
+
   return (
     <div className="google-docs-editor">
       <ReactQuill ref={quillRef} />
     </div>
   );
 }
+
+export default Editor;
